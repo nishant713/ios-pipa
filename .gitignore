@@ -1,0 +1,31 @@
+# device dumps: persist/modemst/fsg hold IMEI + calibration; live DT holds the serial
+backup/
+dtb/
+recovery/
+# third-party/Apple sources fetched for reading
+research/
+shim/out/
+xnu/out/
+xnu/out-*/
+__pycache__/
+# build outputs and device logs: CI artifacts, boot images, pulled kernel logs
+logs/
+*.img
+*.simg
+*.zip
+/*.bin
+sweet-userland/
+sweet-audio/
+sweet-bt/
+sweet-metal/
+pipa-userland/
+pipa-audio/
+pipa-bt/
+pipa-metal/
+pipa-metal2/
+loader/out/
+# the Metal-on-Vulkan build's fetched sources and outputs (userland/metal2), and downloaded artifacts
+work/
+sweet-metal2/
+userland/metal2/metal2/out/
+userland/metal2/turnip/out/

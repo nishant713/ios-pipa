@@ -1,0 +1,226 @@
+name: xnu
+
+on:
+  workflow_dispatch:
+    inputs:
+      macos_version:
+        description: macOS release whose xnu to build (13.5 = xnu-8796, iOS 16 era)
+        default: "13.5"
+      kernel_config:
+        description: RELEASE / DEVELOPMENT / DEBUG
+        default: DEVELOPMENT
+      machine_config:
+        description: xnu MACHINE_CONFIG
+        default: SWEET
+      keep_going:
+        description: make -k (collect all compile errors in one run)
+        default: "true"
+  push:
+    branches: [main]
+    paths:
+      - "xnu/patches/**"
+      - "tools/validate-repo.py"
+      - "tools/mk-wlfw-header.py"
+      - "tools/mk-ath11k.sh"
+      - "tools/xnu-series-file.py"
+      - "wifi/**"
+      - ".github/workflows/xnu.yml"
+
+concurrency:
+  group: xnu-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DXB_REPO: https://github.com/blacktop/darwin-xnu-build
+  DXB_SHA: 663906528d1cd5ea8fde7de6f16de73db9511549
+  MACOS_VERSION: ${{ inputs.macos_version || '13.5' }}
+  KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
+  MACHINE_CONFIG: ${{ inputs.machine_config || 'SWEET' }}
+
+jobs:
+  # Seconds on Linux instead of a macOS runner slot: a malformed or stale
+  # patch fails here before the 8-minute kernel build starts.
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/validate-repo.py
+
+  build:
+    needs: validate
+    # macOS 14 images (the last with Xcode 15) are retired on 2026-11-02. On macos-15 the oldest
+    # Xcode is 16.0, whose iig emits IORPC.kernelContent: xnu 0167 backports that field.
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch build script
+        run: |
+          git init -q dxb
+          git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
+          git -C dxb checkout -q FETCH_HEAD
+          # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
+          cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
+          # libfirehose_kernel is built arm64e-only; the SWEET kernel is plain arm64
+          sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="x86_64 arm64e arm64" VALID_ARCHS="x86_64 arm64e arm64"/' dxb/build.sh
+          grep -c 'VALID_ARCHS="x86_64 arm64e arm64"' dxb/build.sh
+          ls dxb/patches
+
+      # bsd/dev/sweet_wlfw.c (0127) speaks the QCA6390 firmware's QMI messages as Linux's ath11k
+      # describes them. Those descriptions are BSD-3-Clause-Clear and are not kept in git: they are
+      # taken from Linux 7.0.14 here, checked, and handed to the build as a generated patch.
+      - name: WLFW message header (ath11k of Linux 7.0.14)
+        run: |
+          mkdir -p ath11k
+          base=https://raw.githubusercontent.com/gregkh/linux/v7.0.14/drivers/net/wireless/ath/ath11k
+          for f in qmi.c qmi.h core.c hw.c ce.h htc.h; do
+            curl -sSfL --retry 4 -o "ath11k/$f" "$base/$f"
+          done
+          cat > ath11k.sha256 <<'SUMS'
+          3c560fd52bde408aa2f879902bdad973b52aeac588999ef49e54e0b1436e6d67  ath11k/qmi.c
+          9d6014eb4720185fe82887fb200243e90da6cce312a2cd6959c260b648d36285  ath11k/qmi.h
+          89f618dc1986bd1e218b38c4555a4dd19c160c3ad38681dfb9f85324a983266f  ath11k/core.c
+          b84c11bfa5ec3ea12b6908c30453a9c2b8efc09226c2091d3203ae8ac6a7a1df  ath11k/hw.c
+          b46cc3e5f9bce723b8f500a97dd93ddb2d156a8b6a2dded1bdb45b936929ef9d  ath11k/ce.h
+          c395754a59ae715badf4c96e7aace1c5e70395cd74c08383e91bc4ce1bafd4e4  ath11k/htc.h
+          SUMS
+          sed -i '' 's/^ *//' ath11k.sha256
+          shasum -a 256 -c ath11k.sha256
+          python3 tools/mk-wlfw-header.py ath11k sweet_wlfw_ath11k.h \
+            --patch dxb/patches/0999-generated-sweet-wlfw-ath11k.patch
+          head -3 dxb/patches/0999-generated-sweet-wlfw-ath11k.patch
+
+      - name: Deps
+        run: |
+          brew install jq gum bash cmake ninja
+          # build.sh only checks that xcodes exists (Xcode is preinstalled); no bottle on macOS 14
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
+          sudo chmod +x /usr/local/bin/xcodes
+          sw_vers
+          ls -d /Applications/Xcode*.app
+          XC=$(ls -d /Applications/Xcode_*.app | sort -V | head -1)
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          xcrun --find iig
+
+      # The Wi-Fi driver (0128): Linux 7.0.14's ath11k, unmodified, compiled on FreeBSD 15.1's
+      # LinuxKPI and our wifi/lx into one object that the kernel links (SWEET_OBJECTS, read by
+      # makedefs/MakeInc.def). Neither source tree is kept in git: both are fetched here at fixed
+      # commits, and only the files the build reads.
+      - name: Wi-Fi driver object (ath11k of Linux 7.0.14)
+        run: |
+          fetch() {   # fetch DIR URL TAG COMMIT PATH...
+            local dir=$1 url=$2 tag=$3 commit=$4
+            shift 4
+            git clone -q --depth 1 --filter=blob:none --sparse --branch "$tag" "$url" "$dir"
+            git -C "$dir" sparse-checkout set --no-cone "$@"
+            test "$(git -C "$dir" rev-parse HEAD)" = "$commit"
+          }
+          fetch linux https://github.com/gregkh/linux v7.0.14 458c6079fc1d41d564c37679c8ace02cd83ee817 \
+            /drivers/net/wireless/ath/ath11k/ /drivers/net/wireless/ath/spectral_common.h
+          fetch freebsd https://github.com/freebsd/freebsd-src release/15.1.0 96841ea08dcfa84b954a32dc5ae1a26c28966cf4 \
+            /COPYRIGHT $(tools/mk-ath11k.sh --freebsd-paths)
+          python3 tools/xnu-series-file.py khdr bsd/dev/hakios.lx.h bsd/dev/hakios.sta.h \
+            bsd/dev/hakios.qmi.h bsd/dev/hakios.qrtr.h
+          tools/mk-ath11k.sh linux freebsd khdr ath11k-build
+          cat ath11k-build/out/kernel-calls.txt | tr '\n' ' '; echo
+          echo "SWEET_OBJECTS=$PWD/ath11k-build/out/ath11k.o" >> "$GITHUB_ENV"
+
+      - name: Build
+        working-directory: dxb
+        env:
+          # keep going after errors so one run reports every compile failure
+          MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
+        run: |
+          set -o pipefail
+          bash build.sh 2>&1 | tee ../build.log
+
+      # The full log is too long to read the errors from its tail: repeat them at the end.
+      - name: Compile errors
+        if: failure()
+        run: |
+          grep -c -E ' error:' build.log || true
+          grep -n -B4 -A8 -E ' error:' build.log | head -600 || true
+
+      # Warnings do not stop the build; in our own files they are shown here, green or not (the
+      # vendored HID code's many old ones left out): a count per file, then the warnings.
+      - name: Warnings in our files
+        if: always()
+        run: |
+          grep -E '/(bsd/dev/(sweet_|hakios)|bsd/kern/|iokit/Kernel/arm/)[^:]*:[0-9]+:[0-9]+: warning:' build.log |
+            grep -v '/iokit/Kernel/arm/hid/' | sort -u > our-warnings.txt || true
+          echo "$(wc -l < our-warnings.txt) warnings in our files"
+          sed -E 's#^.*/xnu/##; s#:[0-9]+:[0-9]+: warning:.*##' our-warnings.txt | sort | uniq -c | sort -rn | head -40
+          sed -E 's#^.*/xnu/##' our-warnings.txt | head -150
+
+      # Green alone is not enough: build.sh skips a patch git apply refuses (a warning only), and a
+      # kernel linked without the Wi-Fi driver object runs sweet_lx.c's stand-ins. Both fail here.
+      - name: Check every patch and the Wi-Fi driver are in
+        run: |
+          ours=$( (cd xnu/patches && ls *.patch); echo 0999-generated-sweet-wlfw-ath11k.patch )
+          if grep -F 'Skipping patch' build.log | grep -F "$ours"; then
+            echo "a patch of ours was not applied"; exit 1
+          fi
+          for k in dxb/fakeroot/System/Library/Kernels/kernel.*; do [ -f "$k" ] && break; done
+          ls -l "$k"
+          strings -a "$k" | grep -F 'the firmware has said "unified ready"'     # wifi/lx/src/lx_bus.c: ath11k.o
+          strings -a "$k" | grep -F 'THE DRIVER IS UP'                           # bsd/dev/sweet_wifi.c (0128)
+
+      - name: Package build tree for local compiles
+        if: always()
+        run: |
+          # Generated headers, config option headers, mig output and the patched
+          # source: enough to re-run any single compile command from the log locally.
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+          mkdir -p sdk-kernel-platform
+          cp -R "$SDK/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform" sdk-kernel-platform/ || true
+          tar czf buildtree.tgz \
+            --exclude='*.o' --exclude='*.cpo' --exclude='*.a' --exclude='*.dSYM' --exclude='*.unstripped' \
+            --exclude='kernel.development.*' --exclude='.git' \
+            -C dxb build/xnu.obj fakeroot/usr/local/include xnu \
+            -C .. sdk-kernel-platform
+          ls -la buildtree.tgz
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xnu-buildtree
+          path: buildtree.tgz
+          retention-days: 7
+
+      - name: Inspect closed KDK support libs
+        if: always()
+        run: |
+          mkdir -p out/kdk-libs
+          for lib in /Library/Developer/KDKs/*/System/Library/KernelSupport/lib*.a; do
+            b=$(basename "$lib" .a)
+            ar t "$lib" > "out/kdk-libs/$b.members.txt" 2>&1 || true
+            nm -m "$lib" > "out/kdk-libs/$b.nm.txt" 2>&1 || true
+            lipo -info "$lib" >> out/kdk-libs/arch.txt 2>&1 || true
+          done
+          ls -la out/kdk-libs
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          cp -R dxb/fakeroot/System/Library/Kernels/. out/ 2>/dev/null || true
+          ls -la out
+          (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xnu-kernel
+          path: out/
+          if-no-files-found: warn
+
+      # Last, so that the end of the log (all an API reader may get) has them: the compile errors again, short.
+      - name: Compile errors (again, last)
+        if: failure()
+        run: |
+          echo "compile errors: $(grep -c -E ' error:' build.log || true)"
+          grep -E ' error:' build.log | sort -u | head -40 || true
