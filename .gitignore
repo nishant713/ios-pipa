@@ -29,3 +29,11 @@ work/
 sweet-metal2/
 userland/metal2/metal2/out/
 userland/metal2/turnip/out/
+# local device dumps, extracted recovery kernels, debug photos, and scratch binaries
+/pipa.dts
+temp_*/
+/*.jpg
+/--dump
+/--help
+tools/init
+tools/sweet-init.o

@@ -386,7 +386,7 @@ void shim_main(uint64_t dtb)
 
 	/* No payload: probe the internal UFS while the MMU is still off. */
 	stage = "ufs";
-	test_ufs();
+	test_ufs(dtb);
 	con_skip();
 	/* Keep the probe results on screen (later tests clear it); reset after 3 min. */
 	con_str("UFS", "probe done, reset in ~3 min");

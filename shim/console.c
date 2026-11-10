@@ -5,15 +5,52 @@
 #include "console.h"
 #include "font.h"
 
-#define SCALE		4
-#define CH_W		(8 * SCALE)
-#define CH_H		(16 * SCALE)
+static int con_scale = 4;
+#define CH_W		(8 * con_scale)
+#define CH_H		(16 * con_scale)
 #define MARGIN		32
 #define LABEL_COLS	10
 
 volatile uint32_t *con_fb = (volatile uint32_t *)FB_BASE;
 static uint32_t con_bg;
 static int row;
+
+void con_set_scale(int s)
+{
+	if (s >= 1 && s <= 8)
+		con_scale = s;
+}
+
+int con_get_row(void)
+{
+	return row;
+}
+
+void con_set_row(int r)
+{
+	row = r;
+}
+
+static inline uint64_t con_now(void)
+{
+	uint64_t v;
+	__asm__ volatile("isb; mrs %0, cntpct_el0" : "=r"(v));
+	return v;
+}
+
+static inline uint64_t con_frq(void)
+{
+	uint64_t v;
+	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(v));
+	return v;
+}
+
+void con_delay_ms(unsigned ms)
+{
+	uint64_t end = con_now() + con_frq() / 1000 * ms;
+	while (con_now() < end)
+		;
+}
 
 void con_clear(uint32_t bg)
 {
@@ -37,13 +74,61 @@ static void put_char(int col, char ch, uint32_t fg)
 	for (int gy = 0; gy < 16; gy++)
 		for (int gx = 0; gx < 8; gx++) {
 			uint32_t c = (g[gy] & (0x80 >> gx)) ? fg : con_bg;
-			for (int sy = 0; sy < SCALE; sy++) {
-				volatile uint32_t *p = con_fb + (y0 + gy * SCALE + sy) * (FB_STRIDE / 4)
-						       + x0 + gx * SCALE;
-				for (int sx = 0; sx < SCALE; sx++)
+			for (int sy = 0; sy < con_scale; sy++) {
+				volatile uint32_t *p = con_fb + (y0 + gy * con_scale + sy) * (FB_STRIDE / 4)
+						       + x0 + gx * con_scale;
+				for (int sx = 0; sx < con_scale; sx++)
 					p[sx] = c;
 			}
 		}
+}
+
+void con_puts(const char *s, uint32_t fg)
+{
+	int max_cols = (FB_W - 2 * MARGIN) / CH_W;
+	int max_rows = (FB_H - 2 * MARGIN) / CH_H;
+	int col = 0;
+
+	while (*s) {
+		if (*s == '\r') {
+			s++;
+			continue;
+		}
+		if (*s == '\n') {
+			s++;
+			row++;
+			col = 0;
+			if (row >= max_rows) {
+				con_skip();
+				con_str("---", "[PAUSE: 20s TO READ / PHOTO]");
+				con_delay_ms(20000);
+				con_clear(con_bg);
+				row = 0;
+			}
+			continue;
+		}
+		put_char(col++, *s++, fg);
+		if (col >= max_cols) {
+			row++;
+			col = 0;
+			if (row >= max_rows) {
+				con_skip();
+				con_str("---", "[PAUSE: 20s TO READ / PHOTO]");
+				con_delay_ms(20000);
+				con_clear(con_bg);
+				row = 0;
+			}
+		}
+	}
+	if (col > 0)
+		row++;
+	if (row >= max_rows) {
+		con_skip();
+		con_str("---", "[PAUSE: 20s TO READ / PHOTO]");
+		con_delay_ms(20000);
+		con_clear(con_bg);
+		row = 0;
+	}
 }
 
 static int put_str(int col, const char *s, uint32_t fg)

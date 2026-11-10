@@ -72,7 +72,7 @@ GICR, GICR_SIZE = 0x17a60000, 0x100000
 FB, FB_SIZE = 0x9c000000, 0x3000000
 PIPA_ECID = 0x5049504100000001  # 'PIPA' + 1, synthetic
 # Native pipa landscape resolution: 2880x1800, a8r8g8b8 (stride = 2880 * 4 = 11520)
-FB_W, FB_H, FB_STRIDE = 2880, 1800, 2880 * 4
+FB_W, FB_H, FB_STRIDE = 1800, 2880, 1800 * 4
 # Internal UFS host (ufshc@1d84000 "ufs_mem"); QEMU virt has none
 UFS, UFS_SIZE = 0x01d84000, 0x3000
 TIMEBASE = 19200000
@@ -246,8 +246,8 @@ def build(seed=None, qemu=False, highmem=False, touch_fw=None, gmu_fw=None, gpu_
             ph(),
             ('device_type', cstr('display-subsystem')),
             ('compatible', cstr('sweet,display')),
-            ('canvas-width', u32(1080 if native_display else 1125)),
-            ('canvas-height', u32(2400 if native_display else display_height or 2436)),
+            ('canvas-width', u32(1800)),
+            ('canvas-height', u32(2880)),
         ])] + (
         # launchd starts wifid only when the device tree has a node named "wlan" or "marconi-wifi"
         # (com.apple.wifid _LimitLoadToDeviceTree; launchd asks io_device_tree_entry_exists_with_name):

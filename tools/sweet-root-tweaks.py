@@ -66,7 +66,7 @@ import glob, hashlib, os, plistlib, shutil, struct, sys, uuid
 
 BUILD, VERSION = '20H392', '16.7.16'
 MOBILE = 501
-SWEET_ECID, CHIP_ID = 0x5357454554000001, 0x8015      # tools/mkadt.py /chosen
+SWEET_ECID, CHIP_ID = 0x5049504100000001, 0x8015      # PIPA mkadt.py /chosen unique-chip-id (CFD063D6-B9D4-524D-B2ED-2805B3617885)
 
 
 def load(path):
@@ -107,17 +107,26 @@ def platform_uuid():
 
 def merge_host_pref(root, name, values):
     """Merge keys into the ByHost NAME.<platform UUID>.plist files (upper and lower case UUID)."""
-    d = os.path.join(root, 'private/var/mobile/Library/Preferences/ByHost')
-    if not os.path.isdir(d):
-        os.makedirs(d)
-        os.chown(d, MOBILE, MOBILE)
-        os.chmod(d, 0o755)
     host = platform_uuid()
-    for u in (host, host.lower()):
-        path = os.path.join(d, f'{name}.{u}.plist')
-        data = load(path) if os.path.exists(path) else {}
-        data.update(values)
-        save(path, data, MOBILE, MOBILE, 0o600)
+    for home, uid in (('mobile', MOBILE), ('root', 0)):
+        d = os.path.join(root, f'private/var/{home}/Library/Preferences/ByHost')
+        if not os.path.isdir(d):
+            os.makedirs(d, exist_ok=True)
+            os.chown(d, uid, uid)
+            os.chmod(d, 0o755)
+        for u in (host, host.lower()):
+            path = os.path.join(d, f'{name}.{u}.plist')
+            data = load(path) if os.path.exists(path) else {}
+            data.update(values)
+            save(path, data, uid, uid, 0o600)
+    # Also remove datamigrator sentinel if present
+    sentinel = os.path.join(root, 'private/var/datamigrator/migrate')
+    if os.path.exists(sentinel):
+        try:
+            os.remove(sentinel)
+            print('Removed datamigrator migrate sentinel')
+        except Exception as e:
+            print('Could not remove sentinel:', e)
     print('host pref', name, host, sorted(values))
 
 

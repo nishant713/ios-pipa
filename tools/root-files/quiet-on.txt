@@ -10,4 +10,18 @@
 #   com.apple.geod            boot 90: 4 threads 16-37% while widgets were shown (GeoServices: map tiles, place names; no Maps
 #                             without it)
 # A disabled job's services are not registered: a request to it fails at once instead of waiting. Undo: bt-on.txt.
+/private/var/preferences/FeatureFlags/Domain/ExtensionKit.plist=tools/root-files/ExtensionKit.plist 0:0:0644
+-/private/var/datamigrator/migrate
+/private/var/mobile/Library/Preferences/ByHost/com.apple.migration.CFD063D6-B9D4-524D-B2ED-2805B3617885.plist=tools/root-files/migration-done-host.plist 501:501:0600
+/private/var/mobile/Library/Preferences/ByHost/com.apple.migration.cfd063d6-b9d4-524d-b2ed-2805b3617885.plist=tools/root-files/migration-done-host.plist 501:501:0600
+/private/var/root/Library/Preferences/ByHost/com.apple.migration.CFD063D6-B9D4-524D-B2ED-2805B3617885.plist=tools/root-files/migration-done-host.plist 0:0:0600
+/private/var/root/Library/Preferences/ByHost/com.apple.migration.cfd063d6-b9d4-524d-b2ed-2805b3617885.plist=tools/root-files/migration-done-host.plist 0:0:0600
+/private/var/mobile/Library/Preferences/ByHost/com.apple.migration.A9683613-3704-53F2-95D0-98A8FB574E78.plist=tools/root-files/migration-done-host.plist 501:501:0600
+/private/var/mobile/Library/Preferences/ByHost/com.apple.migration.a9683613-3704-53f2-95d0-98a8fb574e78.plist=tools/root-files/migration-done-host.plist 501:501:0600
+/private/var/root/Library/Preferences/ByHost/com.apple.migration.A9683613-3704-53F2-95D0-98A8FB574E78.plist=tools/root-files/migration-done-host.plist 0:0:0600
+/private/var/root/Library/Preferences/ByHost/com.apple.migration.a9683613-3704-53f2-95d0-98a8fb574e78.plist=tools/root-files/migration-done-host.plist 0:0:0600
+/private/var/mobile/Library/Preferences/com.apple.migration.plist=tools/root-files/migration-done.plist 501:501:0600
+/private/var/root/Library/Preferences/com.apple.migration.plist=tools/root-files/migration-done.plist 0:0:0600
 /private/var/db/com.apple.xpc.launchd/disabled.plist=tools/root-files/launchd-disabled-quiet.plist 0:0:0644
+/private/var/mobile/Library/Preferences/com.apple.springboard.plist=tools/root-files/springboard-autounlock.plist 501:501:0600
+/private/var/root/Library/Preferences/com.apple.springboard.plist=tools/root-files/springboard-autounlock.plist 0:0:0600

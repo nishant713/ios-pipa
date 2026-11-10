@@ -6,11 +6,21 @@
 	<true/>
 	<key>com.apple.accessoryupdaterd</key>
 	<true/>
+	<key>com.apple.bluetoothd</key>
+	<true/>
+	<key>com.apple.chronod</key>
+	<true/>
 	<key>com.apple.coreduetd</key>
+	<true/>
+	<key>com.apple.duetexpertd</key>
 	<true/>
 	<key>com.apple.fairplayd.H2</key>
 	<true/>
 	<key>com.apple.geod</key>
+	<true/>
+	<key>com.apple.mediaserverd</key>
+	<true/>
+	<key>com.apple.mobileassetd</key>
 	<true/>
 	<key>com.apple.voicemail.vmd</key>
 	<true/>

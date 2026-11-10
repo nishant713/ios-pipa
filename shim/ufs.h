@@ -1,2 +1,3 @@
 #pragma once
-void test_ufs(void);
+#include <stdint.h>
+void test_ufs(uint64_t dtb);
