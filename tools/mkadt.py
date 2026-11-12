@@ -95,6 +95,8 @@ FILE_PREFIXES = ('/usr/local/', '/Library/Wallpaper/', '/private/var/', '/System
                  '/Library/Audio/Plug-Ins/', '/System/Library/Audio/Plug-Ins/HAL/',
                  # app extensions that cannot work without Metal (tools/root-files/aegir-off.txt)
                  '/System/Library/ExtensionKit/',
+                 # SweetMetal2.bundle (Metal on Turnip Vulkan, sweetmtl=2)
+                 '/System/Library/Extensions/',
                  # Sileo moved among the system apps (tools/root-files/sileo-system.txt)
                  '/Applications/')
 D22AP_ADT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../research/ipsw-x/d22ap.adt')
@@ -117,6 +119,20 @@ def d22ap_product(path=D22AP_ADT, child=None):
             return [(k, v) for k, f, v in c.props if not f and k not in ('name', 'AAPL,phandle')]
     raise SystemExit(f'{path}: no /product node')
 
+def product_identity(path=D22AP_ADT):
+    """Return (target, model, target_type) from a real Apple device tree, or D22AP defaults."""
+    default = ('D22AP', 'iPhone10,3', 'D22')
+    if not os.path.exists(path):
+        return default
+    root, _ = adt.parse(open(path, 'rb').read())
+    props = {k: v for k, f, v in root.props}
+    compat = [s.decode(errors='replace') for s in props.get('compatible', b'').split(b'\0') if s]
+    target = compat[0] if compat else default[0]
+    model = props.get('model', b'').split(b'\0')[0].decode(errors='replace') or default[1]
+    target_type = props.get('target-type', b'').split(b'\0')[0].decode(errors='replace') or default[2]
+    return target, model, target_type
+
+
 u32 = lambda *v: struct.pack('<%dI' % len(v), *v)
 u64 = lambda *v: struct.pack('<%dQ' % len(v), *v)
 cstr = lambda s: s.encode() + b'\0'
@@ -131,7 +147,7 @@ def node(name, props=(), children=()):
 
 def build(seed=None, qemu=False, highmem=False, touch_fw=None, gmu_fw=None, gpu_extra=(), p3=False, files=(),
           deletes=(), lists=(), wifi=(), macs=(), bt=(), moves=(), native_display=False, display_height=None,
-          artwork_subtype=None):
+          artwork_subtype=None, product_adt=D22AP_ADT, scale=3, width=FB_W, height=FB_H):
     """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
     phys_base, mem_size = (HIGH_PHYS_BASE, HIGH_MEM_SIZE) if highmem else (PHYS_BASE, MEM_SIZE)
     # Carve the panic log off the top so the kernel never allocates over it.
@@ -162,7 +178,7 @@ def build(seed=None, qemu=False, highmem=False, touch_fw=None, gmu_fw=None, gpu_
         # from /chosen, the pixel size from IOMobileFramebuffer. Scale 0 makes
         # SpringBoard's FBSDisplayMode "infxinf@0x" invalid. 1080x2400 @3x =
         # 360x800 points (like iPhone X class devices).
-        ('display-scale', u32(3)),
+        ('display-scale', u32(scale)),
         # XNU derives IOPlatformUUID (gethostuuid) from these on arm; without
         # them CFPreferences cannot use kCFPreferencesCurrentHost (no ByHost
         # files), so e.g. DataMigration never records LastSystemVersion and
@@ -246,8 +262,8 @@ def build(seed=None, qemu=False, highmem=False, touch_fw=None, gmu_fw=None, gpu_
             ph(),
             ('device_type', cstr('display-subsystem')),
             ('compatible', cstr('sweet,display')),
-            ('canvas-width', u32(1800)),
-            ('canvas-height', u32(2880)),
+            ('canvas-width', u32(width)),
+            ('canvas-height', u32(height)),
         ])] + (
         # launchd starts wifid only when the device tree has a node named "wlan" or "marconi-wifi"
         # (com.apple.wifid _LimitLoadToDeviceTree; launchd asks io_device_tree_entry_exists_with_name):
@@ -289,7 +305,7 @@ def build(seed=None, qemu=False, highmem=False, touch_fw=None, gmu_fw=None, gpu_
         ('opposed-power-vol-buttons', u32(1)),
     ])
 
-    product_props = d22ap_product()
+    product_props = d22ap_product(product_adt)
     if product_props and not p3:
         # The panel gets 8-bit 'BGRA' (the kernel copies every frame as such). With the iPhone X's
         # "P3", iOS picks deep-colour surfaces: with a GPU renderer CoreAnimation draws the screen
@@ -309,9 +325,9 @@ def build(seed=None, qemu=False, highmem=False, touch_fw=None, gmu_fw=None, gpu_
     # /product/haptics, as the iPhone X has it (xnu 0146; hakios-apollo's mkidentity.py copies it too): MobileGestalt's
     # DeviceSupportsClosedLoopHaptics. With it iOS plays its vibrations and feedbacks as waveforms on the audio
     # server's "Actuator" device (userland/audio), which sweet_haptic.c plays on the motor (apollo_haptic=5).
-    haptics = d22ap_product(child='haptics') if product_props else None
+    haptics = d22ap_product(product_adt, child='haptics') if product_props else None
     if product_props and haptics is None:
-        print('warning: the D22AP tree has no /product/haptics: iOS will not play haptics', file=sys.stderr)
+        print(f'warning: {product_adt} has no /product/haptics: iOS will not play haptics', file=sys.stderr)
     product = [node('product', [ph()] + product_props, [node('haptics', [ph()] + haptics)] if haptics else [])] \
         if product_props else []
 
@@ -319,16 +335,17 @@ def build(seed=None, qemu=False, highmem=False, touch_fw=None, gmu_fw=None, gpu_
     # dram-size we expose, so XNU maps it but never allocates into it.
     pram = node('pram', [ph(), ('reg', u64(panic_base) + u64(PANIC_LOG_SIZE))])
 
-    # Identity of the iPhone X whose userland runs here: compatible[0] is
-    # hw.model/hw.target (D22AP), model is hw.machine/hw.product
-    # (iPhone10,3). 'xiaomi,sweet' MUST stay — SweetPlatformExpert matches
+    # Identity of the device whose userland runs here: compatible[0] is
+    # hw.model/hw.target (e.g. D22AP or J98aAP), model is hw.machine/hw.product
+    # (e.g. iPhone10,3 or iPad6,7). 'xiaomi,sweet' MUST stay — SweetPlatformExpert matches
     # only that string (patch 0016). Keep apollo/sm8250 for identification.
+    target, model, target_type = product_identity(product_adt)
     return node('device-tree', [
         ph(),
-        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + cstr('xiaomi,sweet') + cstr('xiaomi,apollo') + cstr('qcom,sm8250') + cstr('AppleARM')),
-        ('model', cstr('iPhone10,3')),
-        ('target-type', cstr('D22')),
-        ('target-sub-type', cstr('D22AP')),
+        ('compatible', cstr(target) + cstr(model) + cstr('xiaomi,sweet') + cstr('xiaomi,apollo') + cstr('qcom,sm8250') + cstr('AppleARM')),
+        ('model', cstr(model)),
+        ('target-type', cstr(target_type)),
+        ('target-sub-type', cstr(target)),
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
@@ -505,10 +522,15 @@ if __name__ == '__main__':
                  'the boot image would grow too much')
     if files:
         print(f'files for the root: {len(files)}, {sum(len(d) for _, d, _ in files) / 1048576:.1f} MiB', file=sys.stderr)
+    product_adt = sys.argv[sys.argv.index('--product-adt') + 1] if '--product-adt' in sys.argv else D22AP_ADT
+    scale = int(sys.argv[sys.argv.index('--scale') + 1]) if '--scale' in sys.argv else 3
+    width = int(sys.argv[sys.argv.index('--width') + 1]) if '--width' in sys.argv else FB_W
+    height = int(sys.argv[sys.argv.index('--height') + 1]) if '--height' in sys.argv else FB_H
     root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv, touch_fw=touch_fw, gmu_fw=gmu_fw,
                  gpu_extra=gpu_extra, p3='--p3' in sys.argv, native_display='--native-display' in sys.argv,
                  display_height=int(sys.argv[sys.argv.index('--display-height') + 1]) if '--display-height' in sys.argv else None,
                  artwork_subtype=int(sys.argv[sys.argv.index('--artwork-subtype') + 1]) if '--artwork-subtype' in sys.argv else None,
+                 product_adt=product_adt, scale=scale, width=width, height=height,
                  files=files, deletes=deletes, lists=lists, wifi=wifi, macs=macs, bt=bt,
                  moves=moves)
     blob = adt.serialize(root)

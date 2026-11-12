@@ -11,6 +11,19 @@
 /private/var/root/Library/Preferences/ByHost/com.apple.migration.a9683613-3704-53f2-95d0-98a8fb574e78.plist=tools/root-files/migration-done-host.plist 0:0:0600
 /private/var/mobile/Library/Preferences/com.apple.migration.plist=tools/root-files/migration-done.plist 501:501:0600
 /private/var/root/Library/Preferences/com.apple.migration.plist=tools/root-files/migration-done.plist 0:0:0600
-/private/var/db/com.apple.xpc.launchd/disabled.plist=tools/root-files/launchd-disabled-quiet.plist 0:0:0644
+/private/var/db/com.apple.xpc.launchd/disabled.plist=tools/root-files/launchd-disabled-quiet-bt.plist 0:0:0644
 /private/var/mobile/Library/Preferences/com.apple.springboard.plist=tools/root-files/springboard-autounlock.plist 501:501:0600
 /private/var/root/Library/Preferences/com.apple.springboard.plist=tools/root-files/springboard-autounlock.plist 0:0:0600
+/usr/local/lib/libsweet-bt.dylib=sweet-bt/lib/libsweet-bt.dylib 0:0:0755
+/usr/local/lib/libsweet-fix.dylib=sweet-userland/lib/libsweet-fix.dylib 0:0:0755
+
+# Re-enable CoreAudio HAL so mediaserverd stops crash-looping & unblocks video/BT audio
+>/Library/Audio/Plug-Ins/HAL.disabled/VirtualAudio.plugin=/Library/Audio/Plug-Ins/HAL/VirtualAudio.plugin
+/System/Library/Audio/Plug-Ins/HAL/HakiosAudio.driver/HakiosAudio=sweet-audio/HakiosAudio.driver/HakiosAudio 0:0:0755
+/System/Library/Audio/Plug-Ins/HAL/HakiosAudio.driver/Info.plist=sweet-audio/HakiosAudio.driver/Info.plist 0:0:0644
+
+# SweetMetal2 (Turnip Vulkan Metal driver, loaded with boot-arg sweetmtl=2)
+/System/Library/Extensions/SweetMetal2.bundle/HotMetal2=sweet-metal2/SweetMetal2.bundle/HotMetal2 0:0:0755
+/System/Library/Extensions/SweetMetal2.bundle/libvulkan_freedreno.dylib=sweet-metal2/SweetMetal2.bundle/libvulkan_freedreno.dylib 0:0:0755
+/System/Library/Extensions/SweetMetal2.bundle/Info.plist=sweet-metal2/SweetMetal2.bundle/Info.plist 0:0:0644
+/System/Library/Extensions/SweetMetal2.bundle/_CodeSignature/CodeResources=sweet-metal2/SweetMetal2.bundle/_CodeSignature/CodeResources 0:0:0644
